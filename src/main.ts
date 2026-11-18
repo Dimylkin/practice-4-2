@@ -5,7 +5,7 @@ import { createBookFromForm } from "./task4-integration";
 import { filterByTitle, sortBooks } from './task5-utils';
 import { BookCatalog } from './task6-classes';
 import { Wishlist } from './task7-wishlist';
-import { fetchBooks, saveBooks } from './mock-api';
+import { createBook as createServerBook, deleteBook, fetchBooks } from './api';
 
 type AsyncState<T> =
   | { status: 'idle' }
@@ -25,14 +25,14 @@ let catalog = new BookCatalog('main');
 
 let wishlist = new Wishlist();
 
-// Загрузка из localStorage (в практике 4-1 переедет в mock-api.ts)
+// Избранное остаётся локальным состоянием интерфейса.
 const savedWishlist = localStorage.getItem('wishlist');
 if (savedWishlist) {
   wishlist = new Wishlist(JSON.parse(savedWishlist));
 }
 
 // ============================================================
-// СОХРАНЕНИЕ (в практике 4-1 переедет в mock-api.ts)
+// СОХРАНЕНИЕ ИЗБРАННОГО
 // ============================================================
 function saveWishlist() {
   localStorage.setItem('wishlist', JSON.stringify(wishlist.getFavoriteIds()));
@@ -73,8 +73,11 @@ function createBookCard(book: Book): HTMLDivElement {
   deleteBtn.textContent = 'Удалить';
   deleteBtn.addEventListener('click', async () => {
     if (state.status !== 'success') return;
-    const books = state.data.filter(item => item.id !== book.id);
-    await updateBooks(books);
+    const currentBooks = state.data;
+    await updateBooks(async () => {
+      await deleteBook(book.id);
+      return currentBooks.filter(item => item.id !== book.id);
+    });
   });
   card.append(deleteBtn);
 
@@ -180,12 +183,12 @@ async function initApp() {
   render();
 }
 
-async function updateBooks(books: Book[]): Promise<boolean> {
+async function updateBooks(change: () => Promise<Book[]>): Promise<boolean> {
   saving = true;
   const buttons = document.querySelectorAll<HTMLButtonElement>('#bookForm button, .book-card button');
   buttons.forEach(button => button.disabled = true);
   try {
-    await saveBooks(books);
+    const books = await change();
     state = { status: 'success', data: books };
     render();
     return true;
@@ -220,8 +223,8 @@ form.addEventListener('submit', async (e) => {
   try {
     const formData = new FormData(form);
     const newBook = createBookFromForm(formData);
-    const books = [...state.data, newBook];
-    if (await updateBooks(books)) form.reset();
+    const currentBooks = state.data;
+    if (await updateBooks(async () => [...currentBooks, await createServerBook(newBook)])) form.reset();
   } catch (error) {
     if (error instanceof Error) {
       errorMessage = error.message;
